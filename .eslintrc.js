@@ -28,9 +28,11 @@ module.exports = {
         "indent": "off",
         "no-constant-condition": "off",
         "no-async-promise-executor": "off",
+        // We use a `logger` intermediary module
+        "no-console": "error",
     },
     overrides: [{
-        "files": ["src/**/*.{ts, tsx}"],
+        "files": ["src/**/*.ts"],
         "extends": ["matrix-org/ts"],
         "rules": {
             // While we're converting to ts we make heavy use of this

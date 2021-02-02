@@ -356,15 +356,22 @@ MatrixBaseApis.prototype.getCasLoginUrl = function(redirectUrl) {
  *     authenticates with the SSO.
  * @param {string} loginType The type of SSO login we are doing (sso or cas).
  *     Defaults to 'sso'.
+ * @param {string} idpId The ID of the Identity Provider being targeted, optional.
  * @return {string} The HS URL to hit to begin the SSO login process.
  */
-MatrixBaseApis.prototype.getSsoLoginUrl = function(redirectUrl, loginType) {
+MatrixBaseApis.prototype.getSsoLoginUrl = function(redirectUrl, loginType, idpId) {
     if (loginType === undefined) {
         loginType = "sso";
     }
-    return this._http.getUrl("/login/"+loginType+"/redirect", {
-        "redirectUrl": redirectUrl,
-    }, PREFIX_R0);
+
+    let prefix = PREFIX_R0;
+    let url = "/login/" + loginType + "/redirect";
+    if (idpId) {
+        url += "/" + idpId;
+        prefix = "/_matrix/client/unstable/org.matrix.msc2858";
+    }
+
+    return this._http.getUrl(url, { redirectUrl }, prefix);
 };
 
 /**
@@ -462,8 +469,26 @@ MatrixBaseApis.prototype.getFallbackAuthUrl = function(loginType, authSessionId)
  * room_alias: {string(opt)}}</code>
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
-MatrixBaseApis.prototype.createRoom = function(options, callback) {
-    // valid options include: room_alias_name, visibility, invite
+MatrixBaseApis.prototype.createRoom = async function(options, callback) {
+    // some valid options include: room_alias_name, visibility, invite
+
+    // inject the id_access_token if inviting 3rd party addresses
+    const invitesNeedingToken = (options.invite_3pid || [])
+        .filter(i => !i.id_access_token);
+    if (
+        invitesNeedingToken.length > 0 &&
+        this.identityServer &&
+        this.identityServer.getAccessToken &&
+        await this.doesServerAcceptIdentityAccessToken()
+    ) {
+        const identityAccessToken = await this.identityServer.getAccessToken();
+        if (identityAccessToken) {
+            for (const invite of invitesNeedingToken) {
+                invite.id_access_token = identityAccessToken;
+            }
+        }
+    }
+
     return this._http.authedRequest(
         callback, "POST", "/createRoom", undefined, options,
     );

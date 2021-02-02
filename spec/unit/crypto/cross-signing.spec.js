@@ -20,8 +20,9 @@ import anotherjson from 'another-json';
 import * as olmlib from "../../../src/crypto/olmlib";
 import {TestClient} from '../../TestClient';
 import {HttpResponse, setHttpResponses} from '../../test-utils';
-import {resetCrossSigningKeys, createSecretStorageKey} from "./crypto-utils";
+import { resetCrossSigningKeys } from "./crypto-utils";
 import { MatrixError } from '../../../src/http-api';
+import {logger} from '../../../src/logger';
 
 async function makeTestClient(userInfo, options, keys) {
     if (!keys) keys = {};
@@ -49,7 +50,7 @@ async function makeTestClient(userInfo, options, keys) {
 
 describe("Cross Signing", function() {
     if (!global.Olm) {
-        console.warn('Not running megolm backup unit tests: libolm not present');
+        logger.warn('Not running megolm backup unit tests: libolm not present');
         return;
     }
 
@@ -71,8 +72,7 @@ describe("Cross Signing", function() {
         alice.setAccountData = async () => {};
         alice.getAccountDataFromServer = async () => {};
         // set Alice's cross-signing key
-        await alice.bootstrapSecretStorage({
-            createSecretStorageKey,
+        await alice.bootstrapCrossSigning({
             authUploadDeviceSigningKeys: async func => await func({}),
         });
         expect(alice.uploadDeviceSigningKeys).toHaveBeenCalled();
@@ -118,8 +118,7 @@ describe("Cross Signing", function() {
         // through failure, stopping before actually applying changes.
         let bootstrapDidThrow = false;
         try {
-            await alice.bootstrapSecretStorage({
-                createSecretStorageKey,
+            await alice.bootstrapCrossSigning({
                 authUploadDeviceSigningKeys,
             });
         } catch (e) {

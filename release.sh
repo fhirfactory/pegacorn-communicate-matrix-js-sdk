@@ -94,6 +94,14 @@ if [ $# -ne 1 ]; then
     exit 1
 fi
 
+# We use Git branch / commit dependencies for some packages, and Yarn seems
+# to have a hard time getting that right. See also
+# https://github.com/yarnpkg/yarn/issues/4734. As a workaround, we clean the
+# global cache here to ensure we get the right thing.
+yarn cache clean
+# Ensure all dependencies are updated
+yarn install --ignore-scripts
+
 if [ -z "$skip_changelog" ]; then
     # update_changelog doesn't have a --version flag
     update_changelog -h > /dev/null || (echo "github-changelog-generator is required: please install it"; exit)
@@ -170,6 +178,19 @@ echo "yarn version"
 # manually commit the result.
 yarn version --no-git-tag-version --new-version "$release"
 
+# For the published and dist versions of the package, we copy the
+# `matrix_lib_main` and `matrix_lib_typings` fields to `main` and `typings` (if
+# they exist). This small bit of gymnastics allows us to use the TypeScript
+# source directly for development without needing to build before linting or
+# testing.
+for i in main typings
+do
+    lib_value=$(jq -r ".matrix_lib_$i" package.json)
+    if [ "$lib_value" != "null" ]; then
+        jq ".$i = .matrix_lib_$i" package.json > package.json.new && mv package.json.new package.json
+    fi
+done
+
 # commit yarn.lock if it exists, is versioned, and is modified
 if [[ -f yarn.lock && `git status --porcelain yarn.lock | grep '^ M'` ]];
 then
@@ -204,11 +225,6 @@ if [ $dodist -eq 0 ]; then
     pushd "$builddir"
     git clone "$projdir" .
     git checkout "$rel_branch"
-    # We use Git branch / commit dependencies for some packages, and Yarn seems
-    # to have a hard time getting that right. See also
-    # https://github.com/yarnpkg/yarn/issues/4734. As a workaround, we clean the
-    # global cache here to ensure we get the right thing.
-    yarn cache clean
     yarn install
     # We haven't tagged yet, so tell the dist script what version
     # it's building
@@ -327,6 +343,7 @@ if [ -z "$skip_jsdoc" ]; then
         $release index.html
     git add "$release"
     git commit --no-verify -m "Add jsdoc for $release" index.html "$release"
+    git push origin gh-pages
 fi
 
 # if it is a pre-release, leave it on the release branch for now.
@@ -339,18 +356,40 @@ fi
 echo "updating master branch"
 git checkout master
 git pull
-git merge "$rel_branch"
+git merge "$rel_branch" --no-edit
 
-# push master and docs (if generated) to github
+# push master to github
 git push origin master
-if [ -z "$skip_jsdoc" ]; then
-    git push origin gh-pages
-fi
 
 # finally, merge master back onto develop (if it exists)
 if [ $(git branch -lr | grep origin/develop -c) -ge 1 ]; then
     git checkout develop
     git pull
-    git merge master
+    git merge master --no-edit
+
+    # When merging to develop, we need revert the `main` and `typings` fields if
+    # we adjusted them previously.
+    for i in main typings
+    do
+        # If a `lib` prefixed value is present, it means we adjusted the field
+        # earlier at publish time, so we should revert it now.
+        if [ "$(jq -r ".matrix_lib_$i" package.json)" != "null" ]; then
+            # If there's a `src` prefixed value, use that, otherwise delete.
+            # This is used to delete the `typings` field and reset `main` back
+            # to the TypeScript source.
+            src_value=$(jq -r ".matrix_src_$i" package.json)
+            if [ "$src_value" != "null" ]; then
+                jq ".$i = .matrix_src_$i" package.json > package.json.new && mv package.json.new package.json
+            else
+                jq "del(.$i)" package.json > package.json.new && mv package.json.new package.json
+            fi
+        fi
+    done
+
+    if [ -n "$(git ls-files --modified package.json)" ]; then
+        echo "Committing develop package.json"
+        git commit package.json -m "Resetting package fields for development"
+    fi
+
     git push origin develop
 fi
