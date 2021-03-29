@@ -19,6 +19,7 @@ limitations under the License.
 
 import {logger} from './logger';
 import {URL as NodeURL} from "url";
+import SdkConfig from '../../pegacorn-communicate-matrix-react-sdk/src/SdkConfig';
 
 // Dev note: Auto discovery is part of the spec.
 // See: https://matrix.org/docs/spec/client_server/r0.4.0.html#server-discovery
@@ -428,13 +429,22 @@ export class AutoDiscovery {
      * be an empty object.
      */
     static async getRawClientConfig(domain) {
+        const default_server_config = SdkConfig.get()['default_server_config'];
+        const base_url_from_config = default_server_config['m.homeserver']['base_url'] || SdkConfig.get()['default_server_name'];
+        const server_name = base_url_from_config.replace('https://','');
+        console.log("config value for base_url:::", base_url_from_config);
+
         if (!domain || typeof(domain) !== "string" || domain.length === 0) {
             throw new Error("'domain' must be a string of non-zero length");
         }
 
+        if(!server_name.includes(domain)){
+            domain = server_name;
+        }
         const response = await this._fetchWellKnownObject(
             `https://${domain}/.well-known/matrix/client`,
         );
+        console.log("E2E well-known response:::", response.raw);
         if (!response) return {};
         return response.raw || {};
     }
