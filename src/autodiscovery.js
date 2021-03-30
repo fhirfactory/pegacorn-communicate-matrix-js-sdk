@@ -429,17 +429,19 @@ export class AutoDiscovery {
      * be an empty object.
      */
     static async getRawClientConfig(domain) {
-        const default_server_config = SdkConfig.get()['default_server_config'];
-        const base_url_from_config = default_server_config['m.homeserver']['base_url'] || SdkConfig.get()['default_server_name'];
-        const server_name = base_url_from_config.replace('https://','');
-        console.log("config value for base_url:::", base_url_from_config);
-
         if (!domain || typeof(domain) !== "string" || domain.length === 0) {
             throw new Error("'domain' must be a string of non-zero length");
         }
 
-        if(!server_name.includes(domain)){
-            domain = server_name;
+        if (SdkConfig.get()['settingDefaults']['UIFeature.lookForWellKnownConfigFromHomeServer']) {
+            const default_server_config = SdkConfig.get()['default_server_config'];
+            const base_url_from_config = default_server_config['m.homeserver']['base_url'] || SdkConfig.get()['default_server_name'];
+            const server_name = base_url_from_config.replace('https://', '');
+            console.log("config value for base_url::", base_url_from_config);
+            console.log("config value for well-known config", SdkConfig.get()['settingDefaults']['UIFeature.lookForWellKnownConfigFromHomeServer']);
+            if (server_name !== domain) {
+                domain = server_name;
+            }
         }
         const response = await this._fetchWellKnownObject(
             `https://${domain}/.well-known/matrix/client`,
