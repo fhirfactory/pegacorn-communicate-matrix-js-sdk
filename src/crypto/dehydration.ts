@@ -1,5 +1,5 @@
 /*
-Copyright 2020 The Matrix.org Foundation C.I.C.
+Copyright 2020-2021 The Matrix.org Foundation C.I.C.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,16 +14,31 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import {decodeBase64, encodeBase64} from './olmlib';
-import {IndexedDBCryptoStore} from '../crypto/store/indexeddb-crypto-store';
-import {decryptAES, encryptAES} from './aes';
 import anotherjson from "another-json";
-import {logger} from '../logger';
+
+import { decodeBase64, encodeBase64 } from './olmlib';
+import { IndexedDBCryptoStore } from '../crypto/store/indexeddb-crypto-store';
+import { decryptAES, encryptAES } from './aes';
+import { logger } from '../logger';
+import { ISecretStorageKeyInfo } from "./api";
+import { Crypto } from "./index";
 
 // FIXME: these types should eventually go in a different file
 type Signatures = Record<string, Record<string, string>>;
 
-interface DeviceKeys {
+export interface IDehydratedDevice {
+    device_id: string; // eslint-disable-line camelcase
+    device_data: ISecretStorageKeyInfo & { // eslint-disable-line camelcase
+        algorithm: string;
+        account: string; // pickle
+    };
+}
+
+export interface IDehydratedDeviceKeyInfo {
+    passphrase?: string;
+}
+
+export interface IDeviceKeys {
     algorithms: Array<string>;
     device_id: string; // eslint-disable-line camelcase
     user_id: string; // eslint-disable-line camelcase
@@ -31,7 +46,7 @@ interface DeviceKeys {
     signatures?: Signatures;
 }
 
-interface OneTimeKey {
+export interface IOneTimeKey {
     key: string;
     fallback?: boolean;
     signatures?: Signatures;
@@ -47,20 +62,20 @@ export class DehydrationManager {
     private key: Uint8Array;
     private keyInfo: {[props: string]: any};
     private deviceDisplayName: string;
-    constructor(private crypto) {
+    constructor(private readonly crypto: Crypto) {
         this.getDehydrationKeyFromCache();
     }
     async getDehydrationKeyFromCache(): Promise<void> {
-        return await this.crypto._cryptoStore.doTxn(
+        return await this.crypto.cryptoStore.doTxn(
             'readonly',
             [IndexedDBCryptoStore.STORE_ACCOUNT],
             (txn) => {
-                this.crypto._cryptoStore.getSecretStorePrivateKey(
+                this.crypto.cryptoStore.getSecretStorePrivateKey(
                     txn,
                     async (result) => {
                         if (result) {
-                            const {key, keyInfo, deviceDisplayName, time} = result;
-                            const pickleKey = Buffer.from(this.crypto._olmDevice._pickleKey);
+                            const { key, keyInfo, deviceDisplayName, time } = result;
+                            const pickleKey = Buffer.from(this.crypto.olmDevice.pickleKey);
                             const decrypted = await decryptAES(key, pickleKey, DEHYDRATION_ALGORITHM);
                             this.key = decodeBase64(decrypted);
                             this.keyInfo = keyInfo;
@@ -101,11 +116,11 @@ export class DehydrationManager {
                 this.timeoutId = undefined;
             }
             // clear storage
-            await this.crypto._cryptoStore.doTxn(
+            await this.crypto.cryptoStore.doTxn(
                 'readwrite',
                 [IndexedDBCryptoStore.STORE_ACCOUNT],
                 (txn) => {
-                    this.crypto._cryptoStore.storeSecretStorePrivateKey(
+                    this.crypto.cryptoStore.storeSecretStorePrivateKey(
                         txn, "dehydration", null,
                     );
                 },
@@ -145,15 +160,15 @@ export class DehydrationManager {
             this.timeoutId = undefined;
         }
         try {
-            const pickleKey = Buffer.from(this.crypto._olmDevice._pickleKey);
+            const pickleKey = Buffer.from(this.crypto.olmDevice.pickleKey);
 
             // update the crypto store with the timestamp
             const key = await encryptAES(encodeBase64(this.key), pickleKey, DEHYDRATION_ALGORITHM);
-            await this.crypto._cryptoStore.doTxn(
+            await this.crypto.cryptoStore.doTxn(
                 'readwrite',
                 [IndexedDBCryptoStore.STORE_ACCOUNT],
                 (txn) => {
-                    this.crypto._cryptoStore.storeSecretStorePrivateKey(
+                    this.crypto.cryptoStore.storeSecretStorePrivateKey(
                         txn, "dehydration",
                         {
                             keyInfo: this.keyInfo,
@@ -192,7 +207,7 @@ export class DehydrationManager {
             }
 
             logger.log("Uploading account to server");
-            const dehydrateResult = await this.crypto._baseApis._http.authedRequest(
+            const dehydrateResult = await this.crypto.baseApis.http.authedRequest(
                 undefined,
                 "PUT",
                 "/dehydrated_device",
@@ -209,10 +224,10 @@ export class DehydrationManager {
             // send the keys to the server
             const deviceId = dehydrateResult.device_id;
             logger.log("Preparing device keys", deviceId);
-            const deviceKeys: DeviceKeys = {
-                algorithms: this.crypto._supportedAlgorithms,
+            const deviceKeys: IDeviceKeys = {
+                algorithms: this.crypto.supportedAlgorithms,
                 device_id: deviceId,
-                user_id: this.crypto._userId,
+                user_id: this.crypto.userId,
                 keys: {
                     [`ed25519:${deviceId}`]: e2eKeys.ed25519,
                     [`curve25519:${deviceId}`]: e2eKeys.curve25519,
@@ -220,21 +235,21 @@ export class DehydrationManager {
             };
             const deviceSignature = account.sign(anotherjson.stringify(deviceKeys));
             deviceKeys.signatures = {
-                [this.crypto._userId]: {
+                [this.crypto.userId]: {
                     [`ed25519:${deviceId}`]: deviceSignature,
                 },
             };
-            if (this.crypto._crossSigningInfo.getId("self_signing")) {
-                await this.crypto._crossSigningInfo.signObject(deviceKeys, "self_signing");
+            if (this.crypto.crossSigningInfo.getId("self_signing")) {
+                await this.crypto.crossSigningInfo.signObject(deviceKeys, "self_signing");
             }
 
             logger.log("Preparing one-time keys");
             const oneTimeKeys = {};
             for (const [keyId, key] of Object.entries(otks.curve25519)) {
-                const k: OneTimeKey = {key};
+                const k: IOneTimeKey = { key };
                 const signature = account.sign(anotherjson.stringify(k));
                 k.signatures = {
-                    [this.crypto._userId]: {
+                    [this.crypto.userId]: {
                         [`ed25519:${deviceId}`]: signature,
                     },
                 };
@@ -244,10 +259,10 @@ export class DehydrationManager {
             logger.log("Preparing fallback keys");
             const fallbackKeys = {};
             for (const [keyId, key] of Object.entries(fallbacks.curve25519)) {
-                const k: OneTimeKey = {key, fallback: true};
+                const k: IOneTimeKey = { key, fallback: true };
                 const signature = account.sign(anotherjson.stringify(k));
                 k.signatures = {
-                    [this.crypto._userId]: {
+                    [this.crypto.userId]: {
                         [`ed25519:${deviceId}`]: signature,
                     },
                 };
@@ -255,7 +270,7 @@ export class DehydrationManager {
             }
 
             logger.log("Uploading keys to server");
-            await this.crypto._baseApis._http.authedRequest(
+            await this.crypto.baseApis.http.authedRequest(
                 undefined,
                 "POST",
                 "/keys/upload/" + encodeURI(deviceId),
@@ -279,7 +294,7 @@ export class DehydrationManager {
         }
     }
 
-    private stop() {
+    public stop() {
         if (this.timeoutId) {
             global.clearTimeout(this.timeoutId);
             this.timeoutId = undefined;

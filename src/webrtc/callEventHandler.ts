@@ -14,11 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import MatrixEvent from '../models/event';
-import {logger} from '../logger';
+import { MatrixEvent } from '../models/event';
+import { logger } from '../logger';
 import { createNewMatrixCall, MatrixCall, CallErrorCode, CallState, CallDirection } from './call';
 import { EventType } from '../@types/event';
 import { MatrixClient } from '../client';
+import { MCallAnswer, MCallHangupReject } from "./callEventTypes";
 
 // Don't ring unless we'd be ringing for at least 3 seconds: the user needs some
 // time to press the 'accept' button
@@ -43,19 +44,23 @@ export class CallEventHandler {
         // after loading and after we've been offline for a bit.
         this.callEventBuffer = [];
         this.candidateEventsByCall = new Map<string, Array<MatrixEvent>>();
+    }
+
+    public start() {
         this.client.on("sync", this.evaluateEventBuffer);
-        this.client.on("event", this.onEvent);
+        this.client.on("Room.timeline", this.onRoomTimeline);
     }
 
     public stop() {
         this.client.removeListener("sync", this.evaluateEventBuffer);
-        this.client.removeListener("event", this.onEvent);
+        this.client.removeListener("Room.timeline", this.onRoomTimeline);
     }
 
-    private evaluateEventBuffer = () => {
+    private evaluateEventBuffer = async () => {
         if (this.client.getSyncState() === "SYNCING") {
-            // don't process any events until they are all decrypted
-            if (this.callEventBuffer.some((e) => e.isBeingDecrypted())) return;
+            await Promise.all(this.callEventBuffer.map(event => {
+                this.client.decryptEventIfNeeded(event);
+            }));
 
             const ignoreCallIds = new Set<String>();
             // inspect the buffer and mark all calls which have been answered
@@ -76,18 +81,19 @@ export class CallEventHandler {
                     continue;
                 }
                 try {
-                    this.handleCallEvent(e);
+                    await this.handleCallEvent(e);
                 } catch (e) {
                     logger.error("Caught exception handling call event", e);
                 }
             }
             this.callEventBuffer = [];
         }
-    }
+    };
 
-    private onEvent = (event: MatrixEvent) => {
+    private onRoomTimeline = (event: MatrixEvent) => {
+        this.client.decryptEventIfNeeded(event);
         // any call events or ones that might be once they're decrypted
-        if (event.getType().indexOf("m.call.") === 0 || event.isBeingDecrypted()) {
+        if (this.eventIsACall(event) || event.isBeingDecrypted()) {
             // queue up for processing once all events from this sync have been
             // processed (see above).
             this.callEventBuffer.push(event);
@@ -95,8 +101,8 @@ export class CallEventHandler {
 
         if (event.isBeingDecrypted() || event.isDecryptionFailure()) {
             // add an event listener for once the event is decrypted.
-            event.once("Event.decrypted", () => {
-                if (event.getType().indexOf("m.call.") === -1) return;
+            event.once("Event.decrypted", async () => {
+                if (!this.eventIsACall(event)) return;
 
                 if (this.callEventBuffer.includes(event)) {
                     // we were waiting for that event to decrypt, so recheck the buffer
@@ -105,32 +111,39 @@ export class CallEventHandler {
                     // This one wasn't buffered so just run the event handler for it
                     // straight away
                     try {
-                        this.handleCallEvent(event);
+                        await this.handleCallEvent(event);
                     } catch (e) {
                         logger.error("Caught exception handling call event", e);
                     }
                 }
             });
         }
+    };
+
+    private eventIsACall(event: MatrixEvent): boolean {
+        const type = event.getType();
+        /**
+         * Unstable prefixes:
+         *   - org.matrix.call. : MSC3086 https://github.com/matrix-org/matrix-doc/pull/3086
+         */
+        return type.startsWith("m.call.") || type.startsWith("org.matrix.call.");
     }
 
-    private handleCallEvent(event: MatrixEvent) {
+    private async handleCallEvent(event: MatrixEvent) {
         const content = event.getContent();
+        const type = event.getType() as EventType;
+        const weSentTheEvent = event.getSender() === this.client.credentials.userId;
         let call = content.call_id ? this.calls.get(content.call_id) : undefined;
-        //console.info("RECV %s content=%s", event.getType(), JSON.stringify(content));
+        //console.info("RECV %s content=%s", type, JSON.stringify(content));
 
-        if (event.getType() === EventType.CallInvite) {
-            if (event.getSender() === this.client.credentials.userId) {
-                return; // ignore invites you send
-            }
+        if (type === EventType.CallInvite) {
+            // ignore invites you send
+            if (weSentTheEvent) return;
+            // expired call
+            if (event.getLocalAge() > content.lifetime - RING_GRACE_PERIOD) return;
+            // stale/old invite event
+            if (call && call.state === CallState.Ended) return;
 
-            if (event.getLocalAge() > content.lifetime - RING_GRACE_PERIOD) {
-                return; // expired call
-            }
-
-            if (call && call.state === CallState.Ended) {
-                return; // stale/old invite event
-            }
             if (call) {
                 logger.log(
                     `WARN: Already have a MatrixCall with id ${content.call_id} but got an ` +
@@ -140,9 +153,11 @@ export class CallEventHandler {
 
             const timeUntilTurnCresExpire = this.client.getTurnServersExpiry() - Date.now();
             logger.info("Current turn creds expire in " + timeUntilTurnCresExpire + " ms");
-            call = createNewMatrixCall(this.client, event.getRoomId(), {
-                forceTURN: this.client._forceTURN,
-            });
+            call = createNewMatrixCall(
+                this.client,
+                event.getRoomId(),
+                { forceTURN: this.client.forceTURN },
+            );
             if (!call) {
                 logger.log(
                     "Incoming call ID " + content.call_id + " but this client " +
@@ -155,7 +170,7 @@ export class CallEventHandler {
             }
 
             call.callId = content.call_id;
-            call.initWithInvite(event);
+            await call.initWithInvite(event);
             this.calls.set(call.callId, call);
 
             // if we stashed candidate events for that call ID, play them back now
@@ -187,9 +202,11 @@ export class CallEventHandler {
                 // we've got an invite, pick the incoming call because we know
                 // we haven't sent our invite yet otherwise, pick whichever
                 // call has the lowest call ID (by string comparison)
-                if (existingCall.state === CallState.WaitLocalMedia ||
-                        existingCall.state === CallState.CreateOffer ||
-                        existingCall.callId > call.callId) {
+                if (
+                    existingCall.state === CallState.WaitLocalMedia ||
+                    existingCall.state === CallState.CreateOffer ||
+                    existingCall.callId > call.callId
+                ) {
                     logger.log(
                         "Glare detected: answering incoming call " + call.callId +
                         " and canceling outgoing call " + existingCall.callId,
@@ -206,21 +223,10 @@ export class CallEventHandler {
             } else {
                 this.client.emit("Call.incoming", call);
             }
-        } else if (event.getType() === EventType.CallAnswer) {
-            if (!call) {
-                return;
-            }
-            if (event.getSender() === this.client.credentials.userId) {
-                if (call.state === CallState.Ringing) {
-                    call.onAnsweredElsewhere(content);
-                }
-            } else {
-                call.onAnswerReceived(event);
-            }
-        } else if (event.getType() === EventType.CallCandidates) {
-            if (event.getSender() === this.client.credentials.userId) {
-                return;
-            }
+            return;
+        } else if (type === EventType.CallCandidates) {
+            if (weSentTheEvent) return;
+
             if (!call) {
                 // store the candidates; we may get a call eventually.
                 if (!this.candidateEventsByCall.has(content.call_id)) {
@@ -230,7 +236,8 @@ export class CallEventHandler {
             } else {
                 call.onRemoteIceCandidatesReceived(event);
             }
-        } else if ([EventType.CallHangup, EventType.CallReject].includes(event.getType())) {
+            return;
+        } else if ([EventType.CallHangup, EventType.CallReject].includes(type)) {
             // Note that we also observe our own hangups here so we can see
             // if we've already rejected a call that would otherwise be valid
             if (!call) {
@@ -245,32 +252,52 @@ export class CallEventHandler {
                 }
             } else {
                 if (call.state !== CallState.Ended) {
-                    if (event.getType() === EventType.CallHangup) {
-                        call.onHangupReceived(content);
+                    if (type === EventType.CallHangup) {
+                        call.onHangupReceived(content as MCallHangupReject);
                     } else {
-                        call.onRejectReceived(content);
+                        call.onRejectReceived(content as MCallHangupReject);
                     }
                     this.calls.delete(content.call_id);
                 }
             }
-        } else if (event.getType() === EventType.CallSelectAnswer) {
-            if (!call) return;
+            return;
+        }
 
-            if (event.getContent().party_id === call.ourPartyId) {
-                // Ignore remote echo
-                return;
-            }
+        // The following events need a call and a peer connection
+        if (!call || !call.hasPeerConnection) {
+            logger.warn("Discarding an event, we don't have a call/peerConn", type);
+            return;
+        }
+        // Ignore remote echo
+        if (event.getContent().party_id === call.ourPartyId) return;
 
-            call.onSelectAnswerReceived(event);
-        } else if (event.getType() === EventType.CallNegotiate) {
-            if (!call) return;
+        switch (type) {
+            case EventType.CallAnswer:
+                if (weSentTheEvent) {
+                    if (call.state === CallState.Ringing) {
+                        call.onAnsweredElsewhere(content as MCallAnswer);
+                    }
+                } else {
+                    call.onAnswerReceived(event);
+                }
+                break;
+            case EventType.CallSelectAnswer:
+                call.onSelectAnswerReceived(event);
+                break;
 
-            if (event.getContent().party_id === call.ourPartyId) {
-                // Ignore remote echo
-                return;
-            }
+            case EventType.CallNegotiate:
+                call.onNegotiateReceived(event);
+                break;
 
-            call.onNegotiateReceived(event);
+            case EventType.CallAssertedIdentity:
+            case EventType.CallAssertedIdentityPrefix:
+                call.onAssertedIdentityReceived(event);
+                break;
+
+            case EventType.CallSDPStreamMetadataChanged:
+            case EventType.CallSDPStreamMetadataChangedPrefix:
+                call.onSDPStreamMetadataChangedReceived(event);
+                break;
         }
     }
 }

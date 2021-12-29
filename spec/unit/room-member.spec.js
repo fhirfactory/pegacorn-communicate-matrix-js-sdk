@@ -1,5 +1,5 @@
 import * as utils from "../test-utils";
-import {RoomMember} from "../../src/models/room-member";
+import { RoomMember } from "../../src/models/room-member";
 
 describe("RoomMember", function() {
     const roomId = "!foo:bar";
@@ -122,6 +122,34 @@ describe("RoomMember", function() {
 
             member.setPowerLevelEvent(event);
             expect(member.powerLevel).toEqual(0);
+            expect(emitCount).toEqual(1);
+        });
+
+        it("should not honor string power levels.",
+        function() {
+            const event = utils.mkEvent({
+                type: "m.room.power_levels",
+                room: roomId,
+                user: userA,
+                content: {
+                    users_default: 20,
+                    users: {
+                        "@alice:bar": "5",
+                    },
+                },
+                event: true,
+            });
+            let emitCount = 0;
+
+            member.on("RoomMember.powerLevel", function(emitEvent, emitMember) {
+                emitCount += 1;
+                expect(emitMember.userId).toEqual('@alice:bar');
+                expect(emitMember.powerLevel).toEqual(20);
+                expect(emitEvent).toEqual(event);
+            });
+
+            member.setPowerLevelEvent(event);
+            expect(member.powerLevel).toEqual(20);
             expect(emitCount).toEqual(1);
         });
     });

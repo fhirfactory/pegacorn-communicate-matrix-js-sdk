@@ -1,8 +1,10 @@
 import * as utils from "../test-utils";
-import {EventStatus, MatrixEvent} from "../../src/models/event";
-import {EventTimeline} from "../../src/models/event-timeline";
-import {RoomState} from "../../src/models/room-state";
-import {Room} from "../../src/models/room";
+import { DuplicateStrategy, EventStatus, MatrixEvent } from "../../src";
+import { EventTimeline } from "../../src/models/event-timeline";
+import { RoomState } from "../../src";
+import { Room } from "../../src";
+import { UNSTABLE_ELEMENT_FUNCTIONAL_USERS } from "../../src/@types/event";
+import { TestClient } from "../TestClient";
 
 describe("Room", function() {
     const roomId = "!foo:bar";
@@ -15,9 +17,9 @@ describe("Room", function() {
     beforeEach(function() {
         room = new Room(roomId);
         // mock RoomStates
-        room.oldState = room.getLiveTimeline()._startState =
+        room.oldState = room.getLiveTimeline().startState =
             utils.mock(RoomState, "oldState");
-        room.currentState = room.getLiveTimeline()._endState =
+        room.currentState = room.getLiveTimeline().endState =
             utils.mock(RoomState, "currentState");
     });
 
@@ -85,9 +87,11 @@ describe("Room", function() {
         ];
 
         it("should call RoomState.setTypingEvent on m.typing events", function() {
-            room.currentState = utils.mock(RoomState);
             const typing = utils.mkEvent({
-                room: roomId, type: "m.typing", event: true, content: {
+                room: roomId,
+                type: "m.typing",
+                event: true,
+                content: {
                     user_ids: [userA],
                 },
             });
@@ -109,7 +113,7 @@ describe("Room", function() {
             dupe.event.event_id = events[0].getId();
             room.addLiveEvents(events);
             expect(room.timeline[0]).toEqual(events[0]);
-            room.addLiveEvents([dupe], "replace");
+            room.addLiveEvents([dupe], DuplicateStrategy.Replace);
             expect(room.timeline[0]).toEqual(dupe);
         });
 
@@ -139,8 +143,8 @@ describe("Room", function() {
             expect(callCount).toEqual(2);
         });
 
-        it("should call setStateEvents on the right RoomState with the right " +
-        "forwardLooking value for new events", function() {
+        it("should call setStateEvents on the right RoomState with the right forwardLooking value for new events",
+        function() {
             const events = [
                 utils.mkMembership({
                     room: roomId, mship: "invite", user: userB, skey: userA, event: true,
@@ -190,7 +194,7 @@ describe("Room", function() {
             const remoteEvent = utils.mkMessage({
                 room: roomId, user: userA, event: true,
             });
-            remoteEvent.event.unsigned = {transaction_id: "TXN_ID"};
+            remoteEvent.event.unsigned = { transaction_id: "TXN_ID" };
             const remoteEventId = remoteEvent.getId();
 
             let callCount = 0;
@@ -374,7 +378,7 @@ describe("Room", function() {
         let events = null;
 
         beforeEach(function() {
-            room = new Room(roomId, null, null, {timelineSupport: timelineSupport});
+            room = new Room(roomId, null, null, { timelineSupport: timelineSupport });
             // set events each time to avoid resusing Event objects (which
             // doesn't work because they get frozen)
             events = [
@@ -456,7 +460,7 @@ describe("Room", function() {
 
     describe("compareEventOrdering", function() {
         beforeEach(function() {
-            room = new Room(roomId, null, null, {timelineSupport: true});
+            room = new Room(roomId, null, null, { timelineSupport: true });
         });
 
         const events = [
@@ -651,7 +655,8 @@ describe("Room", function() {
                 const roomName = "flibble";
 
                 const event = addMember(userA, "invite");
-                event.event.invite_room_state = [
+                event.event.unsigned = {};
+                event.event.unsigned.invite_room_state = [
                     {
                         type: "m.room.name",
                         state_key: "",
@@ -670,7 +675,8 @@ describe("Room", function() {
                 const roomName = "flibble";
                 setRoomName(roomName);
                 const roomNameToIgnore = "ignoreme";
-                event.event.invite_room_state = [
+                event.event.unsigned = {};
+                event.event.unsigned.invite_room_state = [
                     {
                         type: "m.room.name",
                         state_key: "",
@@ -712,7 +718,7 @@ describe("Room", function() {
             it("uses hero name from state", function() {
                 const name = "Mr B";
                 addMember(userA, "invite");
-                addMember(userB, "join", {name});
+                addMember(userB, "join", { name });
                 room.setSummary({
                     "m.heroes": [userB],
                 });
@@ -723,7 +729,7 @@ describe("Room", function() {
 
             it("uses counts from summary", function() {
                 const name = "Mr B";
-                addMember(userB, "join", {name});
+                addMember(userB, "join", { name });
                 room.setSummary({
                     "m.heroes": [userB],
                     "m.joined_member_count": 50,
@@ -736,8 +742,8 @@ describe("Room", function() {
             it("relies on heroes in case of absent counts", function() {
                 const nameB = "Mr Bean";
                 const nameC = "Mel C";
-                addMember(userB, "join", {name: nameB});
-                addMember(userC, "join", {name: nameC});
+                addMember(userB, "join", { name: nameB });
+                addMember(userC, "join", { name: nameC });
                 room.setSummary({
                     "m.heroes": [userB, userC],
                 });
@@ -747,7 +753,7 @@ describe("Room", function() {
 
             it("uses only heroes", function() {
                 const nameB = "Mr Bean";
-                addMember(userB, "join", {name: nameB});
+                addMember(userB, "join", { name: nameB });
                 addMember(userC, "join");
                 room.setSummary({
                     "m.heroes": [userB],
@@ -840,7 +846,7 @@ describe("Room", function() {
             it("should show the other user's name for private" +
             " (invite join_rules) rooms if you are invited to it.", function() {
                 setJoinRule("invite");
-                addMember(userA, "invite", {user: userB});
+                addMember(userA, "invite", { user: userB });
                 addMember(userB);
                 room.recalculate();
                 const name = room.name;
@@ -915,8 +921,8 @@ describe("Room", function() {
                "available",
             function() {
                 setJoinRule("invite");
-                addMember(userB, 'join', {name: "Alice"});
-                addMember(userA, "invite", {user: userA});
+                addMember(userB, 'join', { name: "Alice" });
+                addMember(userA, "invite", { user: userA });
                 room.recalculate();
                 const name = room.name;
                 expect(name).toEqual("Alice");
@@ -926,7 +932,7 @@ describe("Room", function() {
             function() {
                 setJoinRule("invite");
                 addMember(userB);
-                addMember(userA, "invite", {user: userA});
+                addMember(userA, "invite", { user: userA });
                 room.recalculate();
                 const name = room.name;
                 expect(name).toEqual(userB);
@@ -1176,7 +1182,10 @@ describe("Room", function() {
     describe("addPendingEvent", function() {
         it("should add pending events to the pendingEventList if " +
                       "pendingEventOrdering == 'detached'", function() {
-            const room = new Room(roomId, null, userA, {
+            const client = (new TestClient(
+                "@alice:example.com", "alicedevice",
+            )).client;
+            const room = new Room(roomId, client, userA, {
                 pendingEventOrdering: "detached",
             });
             const eventA = utils.mkMessage({
@@ -1226,7 +1235,10 @@ describe("Room", function() {
 
     describe("updatePendingEvent", function() {
         it("should remove cancelled events from the pending list", function() {
-            const room = new Room(roomId, null, userA, {
+            const client = (new TestClient(
+                "@alice:example.com", "alicedevice",
+            )).client;
+            const room = new Room(roomId, client, userA, {
                 pendingEventOrdering: "detached",
             });
             const eventA = utils.mkMessage({
@@ -1259,7 +1271,6 @@ describe("Room", function() {
             expect(room.getPendingEvents()).toEqual([]);
             expect(callCount).toEqual(1);
         });
-
 
         it("should remove cancelled events from the timeline", function() {
             const room = new Room(roomId, null, userA);
@@ -1308,13 +1319,13 @@ describe("Room", function() {
                 isRoomEncrypted: function() {
                     return false;
                 },
-                _http: {
+                http: {
                     serverResponse,
                     authedRequest: function() {
                         if (this.serverResponse instanceof Error) {
                             return Promise.reject(this.serverResponse);
                         } else {
-                            return Promise.resolve({chunk: this.serverResponse});
+                            return Promise.resolve({ chunk: this.serverResponse });
                         }
                     },
                 },
@@ -1344,7 +1355,7 @@ describe("Room", function() {
 
         it("should load members from server on first call", async function() {
             const client = createClientMock([memberEvent]);
-            const room = new Room(roomId, client, null, {lazyLoadMembers: true});
+            const room = new Room(roomId, client, null, { lazyLoadMembers: true });
             await room.loadMembersIfNeeded();
             const memberA = room.getMember("@user_a:bar");
             expect(memberA.name).toEqual("User A");
@@ -1359,7 +1370,7 @@ describe("Room", function() {
                 room: roomId, event: true, name: "Ms A",
             });
             const client = createClientMock([memberEvent2], [memberEvent]);
-            const room = new Room(roomId, client, null, {lazyLoadMembers: true});
+            const room = new Room(roomId, client, null, { lazyLoadMembers: true });
 
             await room.loadMembersIfNeeded();
 
@@ -1369,7 +1380,7 @@ describe("Room", function() {
 
         it("should allow retry on error", async function() {
             const client = createClientMock(new Error("server says no"));
-            const room = new Room(roomId, client, null, {lazyLoadMembers: true});
+            const room = new Room(roomId, client, null, { lazyLoadMembers: true });
             let hasThrown = false;
             try {
                 await room.loadMembersIfNeeded();
@@ -1378,7 +1389,7 @@ describe("Room", function() {
             }
             expect(hasThrown).toEqual(true);
 
-            client._http.serverResponse = [memberEvent];
+            client.http.serverResponse = [memberEvent];
             await room.loadMembersIfNeeded();
             const memberA = room.getMember("@user_a:bar");
             expect(memberA.name).toEqual("User A");
@@ -1397,17 +1408,17 @@ describe("Room", function() {
             const room = new Room(roomId, null, userA);
             const events = [];
             room.on("Room.myMembership", (_room, membership, oldMembership) => {
-                events.push({membership, oldMembership});
+                events.push({ membership, oldMembership });
             });
             room.updateMyMembership("invite");
             expect(room.getMyMembership()).toEqual("invite");
-            expect(events[0]).toEqual({membership: "invite", oldMembership: null});
+            expect(events[0]).toEqual({ membership: "invite", oldMembership: null });
             events.splice(0);   //clear
             room.updateMyMembership("invite");
             expect(events.length).toEqual(0);
             room.updateMyMembership("join");
             expect(room.getMyMembership()).toEqual("join");
-            expect(events[0]).toEqual({membership: "join", oldMembership: "invite"});
+            expect(events[0]).toEqual({ membership: "join", oldMembership: "invite" });
         });
     });
 
@@ -1415,7 +1426,7 @@ describe("Room", function() {
         it("should return first hero id",
         function() {
             const room = new Room(roomId, null, userA);
-            room.setSummary({'m.heroes': [userB]});
+            room.setSummary({ 'm.heroes': [userB] });
             expect(room.guessDMUserId()).toEqual(userB);
         });
         it("should return first member that isn't self",
@@ -1444,6 +1455,293 @@ describe("Room", function() {
             expect(room.maySendMessage()).toEqual(false);
             room.updateMyMembership("join");
             expect(room.maySendMessage()).toEqual(true);
+        });
+    });
+
+    describe("getDefaultRoomName", function() {
+        it("should return 'Empty room' if a user is the only member",
+        function() {
+            const room = new Room(roomId, null, userA);
+            expect(room.getDefaultRoomName(userA)).toEqual("Empty room");
+        });
+
+        it("should return a display name if one other member is in the room",
+        function() {
+            const room = new Room(roomId, null, userA);
+            room.addLiveEvents([
+                utils.mkMembership({
+                    user: userA, mship: "join",
+                    room: roomId, event: true, name: "User A",
+                }),
+                utils.mkMembership({
+                    user: userB, mship: "join",
+                    room: roomId, event: true, name: "User B",
+                }),
+            ]);
+            expect(room.getDefaultRoomName(userA)).toEqual("User B");
+        });
+
+        it("should return a display name if one other member is banned",
+        function() {
+            const room = new Room(roomId, null, userA);
+            room.addLiveEvents([
+                utils.mkMembership({
+                    user: userA, mship: "join",
+                    room: roomId, event: true, name: "User A",
+                }),
+                utils.mkMembership({
+                    user: userB, mship: "ban",
+                    room: roomId, event: true, name: "User B",
+                }),
+            ]);
+            expect(room.getDefaultRoomName(userA)).toEqual("Empty room (was User B)");
+        });
+
+        it("should return a display name if one other member is invited",
+        function() {
+            const room = new Room(roomId, null, userA);
+            room.addLiveEvents([
+                utils.mkMembership({
+                    user: userA, mship: "join",
+                    room: roomId, event: true, name: "User A",
+                }),
+                utils.mkMembership({
+                    user: userB, mship: "invite",
+                    room: roomId, event: true, name: "User B",
+                }),
+            ]);
+            expect(room.getDefaultRoomName(userA)).toEqual("User B");
+        });
+
+        it("should return 'Empty room (was User B)' if User B left the room",
+        function() {
+            const room = new Room(roomId, null, userA);
+            room.addLiveEvents([
+                utils.mkMembership({
+                    user: userA, mship: "join",
+                    room: roomId, event: true, name: "User A",
+                }),
+                utils.mkMembership({
+                    user: userB, mship: "leave",
+                    room: roomId, event: true, name: "User B",
+                }),
+            ]);
+            expect(room.getDefaultRoomName(userA)).toEqual("Empty room (was User B)");
+        });
+
+        it("should return 'User B and User C' if in a room with two other users",
+        function() {
+            const room = new Room(roomId, null, userA);
+            room.addLiveEvents([
+                utils.mkMembership({
+                    user: userA, mship: "join",
+                    room: roomId, event: true, name: "User A",
+                }),
+                utils.mkMembership({
+                    user: userB, mship: "join",
+                    room: roomId, event: true, name: "User B",
+                }),
+                utils.mkMembership({
+                    user: userC, mship: "join",
+                    room: roomId, event: true, name: "User C",
+                }),
+            ]);
+            expect(room.getDefaultRoomName(userA)).toEqual("User B and User C");
+        });
+
+        it("should return 'User B and 2 others' if in a room with three other users",
+        function() {
+            const room = new Room(roomId, null, userA);
+            room.addLiveEvents([
+                utils.mkMembership({
+                    user: userA, mship: "join",
+                    room: roomId, event: true, name: "User A",
+                }),
+                utils.mkMembership({
+                    user: userB, mship: "join",
+                    room: roomId, event: true, name: "User B",
+                }),
+                utils.mkMembership({
+                    user: userC, mship: "join",
+                    room: roomId, event: true, name: "User C",
+                }),
+                utils.mkMembership({
+                    user: userD, mship: "join",
+                    room: roomId, event: true, name: "User D",
+                }),
+            ]);
+            expect(room.getDefaultRoomName(userA)).toEqual("User B and 2 others");
+        });
+
+        describe("io.element.functional_users", function() {
+            it("should return a display name (default behaviour) if no one is marked as a functional member",
+            function() {
+                const room = new Room(roomId, null, userA);
+                room.addLiveEvents([
+                    utils.mkMembership({
+                        user: userA, mship: "join",
+                        room: roomId, event: true, name: "User A",
+                    }),
+                    utils.mkMembership({
+                        user: userB, mship: "join",
+                        room: roomId, event: true, name: "User B",
+                    }),
+                    utils.mkEvent({
+                        type: UNSTABLE_ELEMENT_FUNCTIONAL_USERS.name, skey: "",
+                        room: roomId, event: true,
+                        content: {
+                            service_members: [],
+                        },
+                    }),
+                ]);
+                expect(room.getDefaultRoomName(userA)).toEqual("User B");
+            });
+
+            it("should return a display name (default behaviour) if service members is a number (invalid)",
+            function() {
+                const room = new Room(roomId, null, userA);
+                room.addLiveEvents([
+                    utils.mkMembership({
+                        user: userA, mship: "join",
+                        room: roomId, event: true, name: "User A",
+                    }),
+                    utils.mkMembership({
+                        user: userB, mship: "join",
+                        room: roomId, event: true, name: "User B",
+                    }),
+                    utils.mkEvent({
+                        type: UNSTABLE_ELEMENT_FUNCTIONAL_USERS.name, skey: "",
+                        room: roomId, event: true,
+                        content: {
+                            service_members: 1,
+                        },
+                    }),
+                ]);
+                expect(room.getDefaultRoomName(userA)).toEqual("User B");
+            });
+
+            it("should return a display name (default behaviour) if service members is a string (invalid)",
+            function() {
+                const room = new Room(roomId, null, userA);
+                room.addLiveEvents([
+                    utils.mkMembership({
+                        user: userA, mship: "join",
+                        room: roomId, event: true, name: "User A",
+                    }),
+                    utils.mkMembership({
+                        user: userB, mship: "join",
+                        room: roomId, event: true, name: "User B",
+                    }),
+                    utils.mkEvent({
+                        type: UNSTABLE_ELEMENT_FUNCTIONAL_USERS.name, skey: "",
+                        room: roomId, event: true,
+                        content: {
+                            service_members: userB,
+                        },
+                    }),
+                ]);
+                expect(room.getDefaultRoomName(userA)).toEqual("User B");
+            });
+
+            it("should return 'Empty room' if the only other member is a functional member",
+            function() {
+                const room = new Room(roomId, null, userA);
+                room.addLiveEvents([
+                    utils.mkMembership({
+                        user: userA, mship: "join",
+                        room: roomId, event: true, name: "User A",
+                    }),
+                    utils.mkMembership({
+                        user: userB, mship: "join",
+                        room: roomId, event: true, name: "User B",
+                    }),
+                    utils.mkEvent({
+                        type: UNSTABLE_ELEMENT_FUNCTIONAL_USERS.name, skey: "",
+                        room: roomId, event: true,
+                        content: {
+                            service_members: [userB],
+                        },
+                    }),
+                ]);
+                expect(room.getDefaultRoomName(userA)).toEqual("Empty room");
+            });
+
+            it("should return 'User B' if User B is the only other member who isn't a functional member",
+            function() {
+                const room = new Room(roomId, null, userA);
+                room.addLiveEvents([
+                    utils.mkMembership({
+                        user: userA, mship: "join",
+                        room: roomId, event: true, name: "User A",
+                    }),
+                    utils.mkMembership({
+                        user: userB, mship: "join",
+                        room: roomId, event: true, name: "User B",
+                    }),
+                    utils.mkMembership({
+                        user: userC, mship: "join",
+                        room: roomId, event: true, name: "User C",
+                    }),
+                    utils.mkEvent({
+                        type: UNSTABLE_ELEMENT_FUNCTIONAL_USERS.name, skey: "",
+                        room: roomId, event: true, user: userA,
+                        content: {
+                            service_members: [userC],
+                        },
+                    }),
+                ]);
+                expect(room.getDefaultRoomName(userA)).toEqual("User B");
+            });
+
+            it("should return 'Empty room' if all other members are functional members",
+            function() {
+                const room = new Room(roomId, null, userA);
+                room.addLiveEvents([
+                    utils.mkMembership({
+                        user: userA, mship: "join",
+                        room: roomId, event: true, name: "User A",
+                    }),
+                    utils.mkMembership({
+                        user: userB, mship: "join",
+                        room: roomId, event: true, name: "User B",
+                    }),
+                    utils.mkMembership({
+                        user: userC, mship: "join",
+                        room: roomId, event: true, name: "User C",
+                    }),
+                    utils.mkEvent({
+                        type: UNSTABLE_ELEMENT_FUNCTIONAL_USERS.name, skey: "",
+                        room: roomId, event: true, user: userA,
+                        content: {
+                            service_members: [userB, userC],
+                        },
+                    }),
+                ]);
+                expect(room.getDefaultRoomName(userA)).toEqual("Empty room");
+            });
+
+            it("should not break if an unjoined user is marked as a service user",
+            function() {
+                const room = new Room(roomId, null, userA);
+                room.addLiveEvents([
+                    utils.mkMembership({
+                        user: userA, mship: "join",
+                        room: roomId, event: true, name: "User A",
+                    }),
+                    utils.mkMembership({
+                        user: userB, mship: "join",
+                        room: roomId, event: true, name: "User B",
+                    }),
+                    utils.mkEvent({
+                        type: UNSTABLE_ELEMENT_FUNCTIONAL_USERS.name, skey: "",
+                        room: roomId, event: true, user: userA,
+                        content: {
+                            service_members: [userC],
+                        },
+                    }),
+                ]);
+                expect(room.getDefaultRoomName(userA)).toEqual("User B");
+            });
         });
     });
 });

@@ -36,11 +36,11 @@ const DEFAULT_NAMESPACE = "matrix";
 // when logging so we always get the current value of console methods.
 log.methodFactory = function(methodName, logLevel, loggerName) {
     return function(...args) {
-        /* eslint-disable babel/no-invalid-this */
+        /* eslint-disable @typescript-eslint/no-invalid-this */
         if (this.prefix) {
             args.unshift(this.prefix);
         }
-        /* eslint-enable babel/no-invalid-this */
+        /* eslint-enable @typescript-eslint/no-invalid-this */
         const supportedByConsole = methodName === "error" ||
             methodName === "warn" ||
             methodName === "trace" ||
@@ -60,9 +60,9 @@ log.methodFactory = function(methodName, logLevel, loggerName) {
  * Can be tailored down to specific use cases if needed.
  */
 export const logger: PrefixedLogger = log.getLogger(DEFAULT_NAMESPACE);
-logger.setLevel(log.levels.DEBUG);
+logger.setLevel(log.levels.DEBUG, false);
 
-interface PrefixedLogger extends Logger {
+export interface PrefixedLogger extends Logger {
     withPrefix?: (prefix: string) => PrefixedLogger;
     prefix?: string;
 }
@@ -76,13 +76,13 @@ function extendLogger(logger: PrefixedLogger) {
 
 extendLogger(logger);
 
-function getPrefixedLogger(prefix): PrefixedLogger {
+function getPrefixedLogger(prefix: string): PrefixedLogger {
     const prefixLogger: PrefixedLogger = log.getLogger(`${DEFAULT_NAMESPACE}-${prefix}`);
     if (prefixLogger.prefix !== prefix) {
         // Only do this setup work the first time through, as loggers are saved by name.
         extendLogger(prefixLogger);
         prefixLogger.prefix = prefix;
-        prefixLogger.setLevel(log.levels.DEBUG);
+        prefixLogger.setLevel(log.levels.DEBUG, false);
     }
     return prefixLogger;
 }

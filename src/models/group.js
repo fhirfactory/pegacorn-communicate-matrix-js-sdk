@@ -17,10 +17,12 @@ limitations under the License.
 
 /**
  * @module models/group
+ * @deprecated groups/communities never made it to the spec and support for them is being discontinued.
  */
 
+import { EventEmitter } from "events";
+
 import * as utils from "../utils";
-import {EventEmitter} from "events";
 
 /**
  * Construct a new Group.
@@ -34,6 +36,7 @@ import {EventEmitter} from "events";
  * @prop {Object} inviter Infomation about the user who invited the logged in user
  *       to the group, if myMembership is 'invite'.
  * @prop {string} inviter.userId The user ID of the inviter
+ * @deprecated groups/communities never made it to the spec and support for them is being discontinued.
  */
 export function Group(groupId) {
     this.groupId = groupId;
@@ -76,6 +79,7 @@ Group.prototype.setInviter = function(inviter) {
  * This means the 'name' and 'avatarUrl' properties.
  * @event module:client~MatrixClient#"Group.profile"
  * @param {Group} group The group whose profile was updated.
+ * @deprecated groups/communities never made it to the spec and support for them is being discontinued.
  * @example
  * matrixClient.on("Group.profile", function(group){
  *   var name = group.name;
@@ -87,6 +91,7 @@ Group.prototype.setInviter = function(inviter) {
  * the group is updated.
  * @event module:client~MatrixClient#"Group.myMembership"
  * @param {Group} group The group in which the user's membership changed
+ * @deprecated groups/communities never made it to the spec and support for them is being discontinued.
  * @example
  * matrixClient.on("Group.myMembership", function(group){
  *   var myMembership = group.myMembership;

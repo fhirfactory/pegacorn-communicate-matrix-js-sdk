@@ -20,10 +20,10 @@ limitations under the License.
  * @module http-api
  */
 
-import {parse as parseContentType} from "content-type";
-import * as utils from "./utils";
-import {logger} from './logger';
+import { parse as parseContentType } from "content-type";
 
+import * as utils from "./utils";
+import { logger } from './logger';
 // we use our own implementation of setTimeout, so that if we get suspended in
 // the middle of a /sync, we cancel the sync as soon as we awake, rather than
 // waiting for the delay to elapse.
@@ -121,7 +121,7 @@ MatrixHttpApi.prototype = {
     },
 
     /**
-     * Upload content to the Home Server
+     * Upload content to the homeserver
      *
      * @param {object} file The object to upload. On a browser, something that
      *   can be sent to XMLHttpRequest.send (typically a File).  Under node.js,
@@ -271,10 +271,10 @@ MatrixHttpApi.prototype = {
             xhr.timeout_timer = callbacks.setTimeout(timeout_fn, 30000);
 
             xhr.onreadystatechange = function() {
+                let resp;
                 switch (xhr.readyState) {
                     case global.XMLHttpRequest.DONE:
                         callbacks.clearTimeout(xhr.timeout_timer);
-                        var resp;
                         try {
                             if (xhr.status === 0) {
                                 throw new AbortError();
@@ -344,7 +344,7 @@ MatrixHttpApi.prototype = {
             promise = this.authedRequest(
                 opts.callback, "POST", "/upload", queryParams, body, {
                     prefix: "/_matrix/media/r0",
-                    headers: {"Content-Type": contentType},
+                    headers: { "Content-Type": contentType },
                     json: false,
                     bodyParser: bodyParser,
                 },
@@ -393,7 +393,7 @@ MatrixHttpApi.prototype = {
         accessToken,
     ) {
         if (!this.opts.idBaseUrl) {
-            throw new Error("No Identity Server base URL set");
+            throw new Error("No identity server base URL set");
         }
 
         const fullUri = this.opts.idBaseUrl + prefix + path;
@@ -657,7 +657,7 @@ MatrixHttpApi.prototype = {
             };
         }
 
-        const headers = utils.extend({}, opts.headers || {});
+        const headers = Object.assign({}, opts.headers || {});
         const json = opts.json === undefined ? true : opts.json;
         let bodyParser = opts.bodyParser;
 
@@ -803,7 +803,8 @@ const requestCallback = function(
         }
         if (!err) {
             try {
-                if (response.statusCode >= 400) {
+                const httpStatus = response.status || response.statusCode; // XMLHttpRequest vs http.IncomingMessage
+                if (httpStatus >= 400) {
                     err = parseErrorResponse(response, body);
                 } else if (bodyParser) {
                     body = bodyParser(body);
@@ -818,7 +819,7 @@ const requestCallback = function(
             userDefinedCallback(err);
         } else {
             const res = {
-                code: response.statusCode,
+                code: response.status || response.statusCode, // XMLHttpRequest vs http.IncomingMessage
 
                 // XXX: why do we bother with this? it doesn't work for
                 // XMLHttpRequest, so clearly we don't use it.
@@ -842,7 +843,7 @@ const requestCallback = function(
  * @returns {Error}
  */
 function parseErrorResponse(response, body) {
-    const httpStatus = response.statusCode;
+    const httpStatus = response.status || response.statusCode; // XMLHttpRequest vs http.IncomingMessage
     const contentType = getResponseContentType(response);
 
     let err;
@@ -861,7 +862,6 @@ function parseErrorResponse(response, body) {
     err.httpStatus = httpStatus;
     return err;
 }
-
 
 /**
  * extract the Content-Type header from the response object, and

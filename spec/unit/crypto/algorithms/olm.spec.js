@@ -16,12 +16,12 @@ limitations under the License.
 */
 
 import '../../../olm-loader';
-import {MemoryCryptoStore} from "../../../../src/crypto/store/memory-crypto-store";
-import {MockStorageApi} from "../../../MockStorageApi";
-import {logger} from "../../../../src/logger";
-import {OlmDevice} from "../../../../src/crypto/OlmDevice";
+import { MemoryCryptoStore } from "../../../../src/crypto/store/memory-crypto-store";
+import { MockStorageApi } from "../../../MockStorageApi";
+import { logger } from "../../../../src/logger";
+import { OlmDevice } from "../../../../src/crypto/OlmDevice";
 import * as olmlib from "../../../../src/crypto/olmlib";
-import {DeviceInfo} from "../../../../src/crypto/deviceinfo";
+import { DeviceInfo } from "../../../../src/crypto/deviceinfo";
 
 function makeOlmDevice() {
     const mockStorage = new MockStorageApi();
@@ -246,7 +246,7 @@ describe("OlmDevice", function() {
 
             // After a single tick through the first task, it should have
             // claimed ownership of all devices to avoid deadlocking others.
-            expect(Object.keys(aliceOlmDevice._sessionsInProgress).length).toBe(2);
+            expect(Object.keys(aliceOlmDevice.sessionsInProgress).length).toBe(2);
 
             const task2 = alwaysSucceed(olmlib.ensureOlmSessionsForDevices(
                 aliceOlmDevice, baseApis, devicesByUserBA,
@@ -254,7 +254,7 @@ describe("OlmDevice", function() {
 
             // The second task should not have changed the ownership count, as
             // it's waiting on the first task.
-            expect(Object.keys(aliceOlmDevice._sessionsInProgress).length).toBe(2);
+            expect(Object.keys(aliceOlmDevice.sessionsInProgress).length).toBe(2);
 
             // Track the tasks, but don't await them yet.
             const promises = Promise.all([
